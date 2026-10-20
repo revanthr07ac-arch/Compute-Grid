@@ -4,14 +4,17 @@ WORKDIR /app
 
 COPY package*.json ./
 COPY packages/shared/package*.json ./packages/shared/
-COPY packages/worker/package*.json ./packages/worker/
+COPY packages/compute/package*.json ./packages/compute/
+COPY apps/worker/package*.json ./apps/worker/
 
 RUN npm install
 
 COPY packages/shared ./packages/shared
-COPY packages/worker ./packages/worker
+COPY packages/compute ./packages/compute
+COPY apps/worker ./apps/worker
 
 RUN npm run build:shared
+RUN npm run build:compute
 RUN npm run build:worker
 
 FROM node:20-alpine AS runner
@@ -20,11 +23,13 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 COPY packages/shared/package*.json ./packages/shared/
-COPY packages/worker/package*.json ./packages/worker/
+COPY packages/compute/package*.json ./packages/compute/
+COPY apps/worker/package*.json ./apps/worker/
 
 RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/packages/worker/dist ./packages/worker/dist
+COPY --from=builder /app/packages/compute/dist ./packages/compute/dist
+COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
 
-CMD ["node", "packages/worker/dist/index.js", "start"]
+CMD ["node", "apps/worker/dist/index.js", "start"]

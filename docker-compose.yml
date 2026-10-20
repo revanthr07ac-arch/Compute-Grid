@@ -1,52 +1,98 @@
 version: '3.8'
 
 services:
+  # ============================================================================
+  # 1. PostgreSQL Database with Persistent Storage & Health Check
+  # ============================================================================
   postgres:
     image: postgres:16-alpine
     container_name: computegrid-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-computegrid}
-    ports:
-      - '5432:5432'
+      POSTGRES_USER: ${POSTGRES_USER:-computegrid_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_password_replace_me}
+      POSTGRES_DB: ${POSTGRES_DB:-computegrid_prod}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
-      interval: 5s
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-computegrid_user} -d $${POSTGRES_DB:-computegrid_prod}']
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '20m'
+        max-file: '5'
 
+  # ============================================================================
+  # 2. Redis Distributed Task Queue & Caching Layer
+  # ============================================================================
   redis:
     image: redis:7-alpine
     container_name: computegrid-redis
     restart: unless-stopped
-    ports:
-      - '6379:6379'
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '20m'
+        max-file: '5'
 
+  # ============================================================================
+  # 3. MinIO S3-Compatible Distributed Object Storage
+  # ============================================================================
   minio:
     image: minio/minio:latest
     container_name: computegrid-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - '9000:9000'
-      - '9001:9001'
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-computegrid_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_secure_password_replace_me}
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9000/minio/health/live || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '20m'
+        max-file: '5'
 
+  # Auto-provision S3 Bucket for ComputeGrid artifacts
+  minio-init:
+    image: minio/mc:latest
+    container_name: computegrid-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-computegrid_minio_admin} $${MINIO_ROOT_PASSWORD:-minio_secure_password_replace_me};
+      /usr/bin/mc mb --ignore-existing local/$${S3_BUCKET:-computegrid-artifacts};
+      /usr/bin/mc anonymous set download local/$${S3_BUCKET:-computegrid-artifacts} || true;
+      echo 'MinIO artifacts bucket provisioned.';
+      exit 0;
+      "
+    restart: "no"
+
+  # ============================================================================
+  # 4. ComputeGrid Backend API & Scheduler Daemon
+  # ============================================================================
   api:
     build:
       context: .
@@ -56,66 +102,155 @@ services:
     environment:
       PORT: 4000
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/computegrid?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-computegrid_user}:${POSTGRES_PASSWORD:-postgres_secure_password_replace_me}@postgres:5432/${POSTGRES_DB:-computegrid_prod}?schema=public
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-computegrid_prod_jwt_secret_key_super_secure_9921}
-      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      JWT_SECRET: ${JWT_SECRET:-replace_with_64_char_cryptographically_secure_random_hex_string}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost,https://127.0.0.1}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
       STORAGE_LOCAL_DIR: /app/data/storage
-      S3_ENDPOINT: http://minio:9000
-      S3_BUCKET: computegrid-artifacts
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
-    ports:
-      - '4000:4000'
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-computegrid-artifacts}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-computegrid_minio_admin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minio_secure_password_replace_me}
+      WORKER_HEARTBEAT_TIMEOUT_SEC: ${WORKER_HEARTBEAT_TIMEOUT_SEC:-30}
+      TASK_LEASE_TIMEOUT_SEC: ${TASK_LEASE_TIMEOUT_SEC:-60}
+      MAX_TASK_RETRIES: ${MAX_TASK_RETRIES:-3}
+      AUTO_SEED: ${AUTO_SEED:-true}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     volumes:
       - api_storage:/app/data/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health/live || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '30m'
+        max-file: '5'
 
+  # ============================================================================
+  # 5. ComputeGrid Web Frontend (Single Page Application)
+  # ============================================================================
   web:
     build:
       context: .
       dockerfile: ./apps/web/Dockerfile
     container_name: computegrid-web
     restart: unless-stopped
-    ports:
-      - '5173:80'
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:80/healthz || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '15m'
+        max-file: '3'
 
+  # ============================================================================
+  # 6. Production Reverse Proxy & TLS Termination (Nginx)
+  # ============================================================================
+  reverse-proxy:
+    image: nginx:alpine
+    container_name: computegrid-gateway
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:80/healthz || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '5'
+
+  # ============================================================================
+  # 7. Distributed Container Worker Agents
+  # ============================================================================
   worker-alpha:
     build:
       context: .
-      dockerfile: ./packages/worker/Dockerfile
+      dockerfile: ./apps/worker/Dockerfile
     container_name: computegrid-worker-alpha
     restart: unless-stopped
     environment:
       COMPUTEGRID_SERVER_URL: http://api:4000
       COMPUTEGRID_ENROLLMENT_TOKEN: ${WORKER_ENROLLMENT_TOKEN:-cg_enroll_demo_initial_token_12345}
-      WORKER_NAME: Container-Worker-Alpha
-      MAX_CONCURRENCY: 2
+      WORKER_NAME: Production-Worker-Alpha
+      MAX_CONCURRENCY: ${WORKER_ALPHA_CONCURRENCY:-4}
+      POLL_INTERVAL_MS: 2000
+      HEARTBEAT_INTERVAL_MS: 8000
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '20m'
+        max-file: '3'
 
   worker-beta:
     build:
       context: .
-      dockerfile: ./packages/worker/Dockerfile
+      dockerfile: ./apps/worker/Dockerfile
     container_name: computegrid-worker-beta
     restart: unless-stopped
     environment:
       COMPUTEGRID_SERVER_URL: http://api:4000
       COMPUTEGRID_ENROLLMENT_TOKEN: ${WORKER_ENROLLMENT_TOKEN:-cg_enroll_demo_initial_token_12345}
-      WORKER_NAME: Container-Worker-Beta
-      MAX_CONCURRENCY: 2
+      WORKER_NAME: Production-Worker-Beta
+      MAX_CONCURRENCY: ${WORKER_BETA_CONCURRENCY:-4}
+      POLL_INTERVAL_MS: 2000
+      HEARTBEAT_INTERVAL_MS: 8000
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '20m'
+        max-file: '3'
 
+# ==============================================================================
+# Persistent Named Volumes
+# ==============================================================================
 volumes:
   postgres_data:
+    name: computegrid_postgres_data
   redis_data:
+    name: computegrid_redis_data
   minio_data:
+    name: computegrid_minio_data
   api_storage:
+    name: computegrid_api_storage
+  certbot_www:
+    name: computegrid_certbot_www

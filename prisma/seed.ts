@@ -30,13 +30,15 @@ async function main() {
     },
   });
 
-  // Create an enrollment token for demouser
-  const token = await prisma.workerEnrollmentToken.create({
-    data: {
+  // Create an enrollment token for demouser (idempotent upsert)
+  const token = await prisma.workerEnrollmentToken.upsert({
+    where: { token: 'cg_enroll_demo_initial_token_12345' },
+    update: {},
+    create: {
       userId: demoUser.id,
       token: 'cg_enroll_demo_initial_token_12345',
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      maxUses: 10,
+      maxUses: 100,
     },
   });
 
