@@ -18,6 +18,8 @@ data/
 apps/api/dev.db
 apps/api/data/
 .e2e_worker_*.json
+.worker_*.json
+.computegrid_worker.json
 
 # Environment variables & secrets (preserve .env.example)
 .env

@@ -77,11 +77,12 @@ export class WorkerController {
 
       // Create worker in transaction
       const result = await prisma.$transaction(async tx => {
+        const newUsesCount = enrollment.usesCount + 1;
         await tx.workerEnrollmentToken.update({
           where: { id: enrollment.id },
           data: {
             usesCount: { increment: 1 },
-            revoked: true, // single-use token revoked immediately
+            revoked: newUsesCount >= enrollment.maxUses,
           },
         });
 

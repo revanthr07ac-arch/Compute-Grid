@@ -777,7 +777,7 @@ export class TaskScheduler {
       } catch (err) {
         console.error('[Scheduler] Recovery daemon error:', err);
       }
-    }, 10000);
+    }, 5000);
 
     console.log('[Scheduler] Background lease recovery daemon running');
   }
