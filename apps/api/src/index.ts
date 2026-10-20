@@ -21,7 +21,20 @@ const server = http.createServer(app);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(
   cors({
-    origin: (origin, callback) => callback(null, true), // Allow all origins for dev / mobile / worker
+    origin: (origin, callback) => {
+      // Allow non-browser requests (e.g., workers, curl, mobile agents)
+      if (!origin) return callback(null, true);
+      // In development / test, allow localhost and dev origins
+      if (ENV.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      // In production, validate strictly against configured CORS_ORIGIN
+      const allowedOrigins = ENV.CORS_ORIGIN.split(',').map(s => s.trim());
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS policy blocked access from origin: ${origin}`), false);
+    },
     credentials: true,
   })
 );
@@ -80,6 +93,8 @@ function handleShutdown(signal: string) {
 process.on('SIGINT', () => handleShutdown('SIGINT'));
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 
-bootstrap();
+if (process.env.NODE_ENV !== 'test') {
+  bootstrap();
+}
 
 export { app, server };

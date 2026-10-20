@@ -67,8 +67,9 @@ apiRouter.use('/worker/tasks', workerTaskRoutes);
 
 // 5. Artifact Endpoints
 const artifactRoutes = Router();
-artifactRoutes.post('/upload', upload.single('file'), ArtifactController.upload);
-artifactRoutes.get('/:artifactId', ArtifactController.getMetadata);
+artifactRoutes.get('/', authenticateUser, ArtifactController.listArtifacts);
+artifactRoutes.post('/upload', authenticateUser, upload.single('file'), ArtifactController.upload);
+artifactRoutes.get('/:artifactId', authenticateUser, ArtifactController.getMetadata);
 artifactRoutes.get('/:artifactId/download', ArtifactController.download);
 apiRouter.use('/artifacts', artifactRoutes);
 

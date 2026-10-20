@@ -187,8 +187,18 @@ export class TaskScheduler {
 
       if (!candidate) return null;
 
-      const updatedTask = await tx.task.update({
-        where: { id: candidate.id },
+      // Atomic claim with optimistic concurrency lock to eliminate race conditions
+      const updateResult = await tx.task.updateMany({
+        where: {
+          id: candidate.id,
+          OR: [
+            { status: 'QUEUED' },
+            {
+              status: { in: ['LEASED', 'RUNNING'] },
+              leaseExpiresAt: { lt: now },
+            },
+          ],
+        },
         data: {
           status: 'LEASED',
           workerId,
@@ -196,8 +206,18 @@ export class TaskScheduler {
           attempts: { increment: 1 },
           startedAt: candidate.startedAt || now,
         },
+      });
+
+      if (updateResult.count === 0) {
+        return null; // Lost race to another concurrent worker
+      }
+
+      const updatedTask = await tx.task.findUnique({
+        where: { id: candidate.id },
         include: { job: true },
       });
+
+      if (!updatedTask) return null;
 
       await tx.taskAttempt.create({
         data: {
@@ -313,6 +333,14 @@ export class TaskScheduler {
       throw new Error(`Task ${taskId} not found`);
     }
 
+    // Validate that the submitting worker currently owns the active lease
+    if (task.workerId !== workerId) {
+      console.warn(
+        `[Scheduler] Rejecting completeTask from worker ${workerId} for task ${taskId}: task is currently assigned to ${task.workerId}`
+      );
+      return;
+    }
+
     // Idempotency check: if already completed, ignore duplicate submission
     if (task.status === 'COMPLETED') {
       return;
@@ -408,6 +436,19 @@ export class TaskScheduler {
     });
 
     if (!task) return;
+
+    // Validate that the failing worker currently owns the active lease
+    if (task.workerId !== workerId) {
+      console.warn(
+        `[Scheduler] Rejecting failTask from worker ${workerId} for task ${taskId}: task is currently assigned to ${task.workerId}`
+      );
+      return;
+    }
+
+    // Idempotency check: if already completed or failed, ignore duplicate submission
+    if (task.status === 'COMPLETED' || task.status === 'FAILED') {
+      return;
+    }
 
     const now = new Date();
     const shouldRetry = canRetry && task.attempts < task.maxAttempts;

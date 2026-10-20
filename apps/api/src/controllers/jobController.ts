@@ -93,6 +93,15 @@ export class JobController {
           take,
           include: {
             user: { select: { id: true, username: true } },
+            tasks: {
+              orderBy: { chunkIndex: 'asc' },
+              include: { worker: { select: { id: true, name: true, os: true } } },
+            },
+            artifacts: true,
+            events: {
+              orderBy: { timestamp: 'desc' },
+              take: 20,
+            },
           },
         }),
         prisma.job.count({ where }),
@@ -102,6 +111,11 @@ export class JobController {
         ...j,
         parameters: JSON.parse(j.parameters),
         outputSummary: j.outputSummary ? JSON.parse(j.outputSummary) : null,
+        tasks: j.tasks?.map(t => ({
+          ...t,
+          inputPayload: t.inputPayload ? JSON.parse(t.inputPayload) : null,
+          outputPayload: t.outputPayload ? JSON.parse(t.outputPayload) : null,
+        })),
       }));
 
       res.json({
@@ -306,6 +320,22 @@ export class JobController {
   public static async getJobTasks(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const jobId = req.params.jobId as string;
+
+      const job = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { id: true, userId: true },
+      });
+
+      if (!job) {
+        res.status(404).json({ success: false, error: 'Job not found' });
+        return;
+      }
+
+      if (req.user?.role !== 'ADMIN' && job.userId !== req.user?.id) {
+        res.status(403).json({ success: false, error: 'Access forbidden to this job' });
+        return;
+      }
+
       const tasks = await prisma.task.findMany({
         where: { jobId },
         orderBy: { chunkIndex: 'asc' },
@@ -330,6 +360,22 @@ export class JobController {
   public static async getJobLogs(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const jobId = req.params.jobId as string;
+
+      const job = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { id: true, userId: true },
+      });
+
+      if (!job) {
+        res.status(404).json({ success: false, error: 'Job not found' });
+        return;
+      }
+
+      if (req.user?.role !== 'ADMIN' && job.userId !== req.user?.id) {
+        res.status(403).json({ success: false, error: 'Access forbidden to this job' });
+        return;
+      }
+
       const logs = await prisma.jobEvent.findMany({
         where: { jobId },
         orderBy: { timestamp: 'desc' },
@@ -347,6 +393,7 @@ export class JobController {
         where: { id: jobId },
         select: {
           id: true,
+          userId: true,
           status: true,
           outputSummary: true,
           outputArtifactId: true,
@@ -357,6 +404,11 @@ export class JobController {
 
       if (!job) {
         res.status(404).json({ success: false, error: 'Job not found' });
+        return;
+      }
+
+      if (req.user?.role !== 'ADMIN' && job.userId !== req.user?.id) {
+        res.status(403).json({ success: false, error: 'Access forbidden to this job' });
         return;
       }
 

@@ -21,20 +21,13 @@ export const ArtifactsPage: React.FC = () => {
 
   const fetchArtifacts = async () => {
     try {
-      // Gather artifacts via jobs
-      const jobs = await api.get<any[]>('/jobs?limit=30');
-      const allArtifacts: any[] = [];
-      for (const j of jobs || []) {
-        if (j.artifacts && j.artifacts.length > 0) {
-          allArtifacts.push(
-            ...j.artifacts.map((a: any) => ({
-              ...a,
-              jobName: j.name,
-            }))
-          );
-        }
-      }
-      setArtifacts(allArtifacts);
+      const data = await api.get<any[]>('/artifacts');
+      setArtifacts(
+        (data || []).map((a: any) => ({
+          ...a,
+          jobName: a.job?.name || 'Artifact Payload',
+        }))
+      );
     } catch (err) {
       console.error('Failed to load artifacts:', err);
     } finally {

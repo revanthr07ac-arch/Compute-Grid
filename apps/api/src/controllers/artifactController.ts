@@ -45,8 +45,38 @@ export class ArtifactController {
     }
   }
 
+  public static async listArtifacts(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const where: any = {};
+      if (req.user.role !== 'ADMIN') {
+        where.userId = req.user.id;
+      }
+
+      const artifacts = await prisma.artifact.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: { job: { select: { id: true, name: true } } },
+      });
+
+      res.json({ success: true, data: artifacts });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   public static async getMetadata(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
       const artifactId = req.params.artifactId as string;
       const artifact = await prisma.artifact.findUnique({
         where: { id: artifactId },
@@ -54,6 +84,11 @@ export class ArtifactController {
 
       if (!artifact) {
         res.status(404).json({ success: false, error: 'Artifact not found' });
+        return;
+      }
+
+      if (req.user.role !== 'ADMIN' && artifact.userId !== req.user.id) {
+        res.status(403).json({ success: false, error: 'Access forbidden to this artifact' });
         return;
       }
 
@@ -80,16 +115,36 @@ export class ArtifactController {
       const token = req.query.token as string;
 
       let userId = req.user?.id;
+      let userRole = req.user?.role;
 
       // Allow download with short-lived token in query param
       if (!userId && token) {
         try {
-          const decoded = jwt.verify(token, ENV.JWT_SECRET) as { userId: string };
+          const decoded = jwt.verify(token, ENV.JWT_SECRET) as { userId: string; role?: 'USER' | 'ADMIN' };
           userId = decoded.userId;
+          userRole = decoded.role;
         } catch {
           res.status(401).json({ success: false, error: 'Invalid or expired download token' });
           return;
         }
+      }
+
+      // Check header token if req.user was not populated
+      if (!userId && req.headers.authorization?.startsWith('Bearer ')) {
+        try {
+          const rawToken = req.headers.authorization.substring(7);
+          const decoded = jwt.verify(rawToken, ENV.JWT_SECRET) as { userId: string; role?: 'USER' | 'ADMIN' };
+          userId = decoded.userId;
+          userRole = decoded.role;
+        } catch {
+          res.status(401).json({ success: false, error: 'Invalid authentication token' });
+          return;
+        }
+      }
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Authentication required to access artifact' });
+        return;
       }
 
       const artifact = await prisma.artifact.findUnique({
@@ -101,8 +156,8 @@ export class ArtifactController {
         return;
       }
 
-      // Check access permission (owner or admin or worker)
-      if (userId && req.user?.role !== 'ADMIN' && artifact.userId !== userId) {
+      // Check access permission (owner or admin)
+      if (userRole !== 'ADMIN' && artifact.userId !== userId) {
         res.status(403).json({ success: false, error: 'Access forbidden to this artifact' });
         return;
       }

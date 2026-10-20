@@ -24,7 +24,22 @@ const envSchema = z.object({
   WORKER_HEARTBEAT_TIMEOUT_SEC: z.string().default('30').transform(val => parseInt(val, 10)),
   TASK_LEASE_TIMEOUT_SEC: z.string().default('60').transform(val => parseInt(val, 10)),
   MAX_TASK_RETRIES: z.string().default('3').transform(val => parseInt(val, 10)),
-});
+}).refine(
+  data => {
+    if (
+      data.NODE_ENV === 'production' &&
+      data.JWT_SECRET === 'computegrid_dev_jwt_secret_key_super_secure_9921'
+    ) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message:
+      'CRITICAL SECURITY CONFIGURATION: JWT_SECRET must be set to a secure, unique secret when running in production (NODE_ENV=production).',
+    path: ['JWT_SECRET'],
+  }
+);
 
 const parsed = envSchema.safeParse(process.env);
 

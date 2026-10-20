@@ -125,7 +125,13 @@ export class TaskExecutor {
       }
     } else if (operation === 'regex-filter') {
       matchedLines = [];
-      const regex = new RegExp(filterPattern || '.*', 'i');
+      let regex: RegExp;
+      try {
+        regex = new RegExp(filterPattern || '.*', 'i');
+      } catch {
+        const escaped = (filterPattern || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        regex = new RegExp(escaped, 'i');
+      }
       for (const line of lines) {
         if (regex.test(line)) {
           matchedLines.push(line);

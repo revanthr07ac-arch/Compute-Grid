@@ -62,8 +62,24 @@ export const FileWorkloadParamsSchema = z.object({
   filename: z.string().min(1),
   content: z.string().optional(),
   chunkCount: z.number().int().min(1).max(500).default(4),
-  filterPattern: z.string().optional(),
-});
+  filterPattern: z.string().max(200, 'Regex filter pattern cannot exceed 200 characters').optional(),
+}).refine(
+  data => {
+    if (data.operation === 'regex-filter' && data.filterPattern) {
+      try {
+        new RegExp(data.filterPattern);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Invalid regular expression syntax in filterPattern',
+    path: ['filterPattern'],
+  }
+);
 
 export const TaskClaimSchema = z.object({
   workerId: z.string().uuid(),
