@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String                   @id @default(uuid())
+  email            String                   @unique
+  username         String                   @unique
+  passwordHash     String
+  role             String                   @default("USER")
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  workers          Worker[]
+  jobs             Job[]
+  enrollmentTokens WorkerEnrollmentToken[]
+  refreshTokens    RefreshToken[]
+  artifacts        Artifact[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@index([username])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model WorkerEnrollmentToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  maxUses   Int       @default(1)
+  usesCount Int       @default(0)
+  revoked   Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+model Worker {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  hostname        String            @default("unknown")
+  os              String            @default("unknown")
+  arch            String            @default("x64")
+  agentVersion    String            @default("1.0.0")
+  status          String            @default("ONLINE")
+  capabilities    String
+  lastHeartbeatAt DateTime          @default(now())
+  tasksCompleted  Int               @default(0)
+  tasksFailed     Int               @default(0)
+  currentTaskId   String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  credentials     WorkerCredential?
+  taskAttempts    TaskAttempt[]
+  metrics         WorkerMetrics[]
+  tasks           Task[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([lastHeartbeatAt])
+}
+
+model WorkerCredential {
+  id         String    @id @default(uuid())
+  workerId   String    @unique
+  worker     Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  secretHash String
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([workerId])
+}
+
+model Job {
+  id                String      @id @default(uuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  description       String?
+  workloadType      String
+  status            String      @default("CREATED")
+  priority          Int         @default(5)
+  progress          Float       @default(0)
+  totalTasks        Int         @default(0)
+  completedTasks    Int         @default(0)
+  failedTasks       Int         @default(0)
+  maxRetriesPerTask Int         @default(2)
+  parameters        String
+  outputSummary     String?
+  outputArtifactId  String?
+  errorMessage      String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  durationMs        Int?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  tasks             Task[]
+  events            JobEvent[]
+  artifacts         Artifact[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Task {
+  id               String        @id @default(uuid())
+  jobId            String
+  job              Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  chunkIndex       Int
+  totalChunks      Int
+  status           String        @default("PENDING")
+  workerId         String?
+  worker           Worker?       @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  attempts         Int           @default(0)
+  maxAttempts      Int           @default(3)
+  leaseExpiresAt   DateTime?
+  progress         Float         @default(0)
+  inputPayload     String
+  outputPayload    String?
+  outputArtifactId String?
+  errorMessage     String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  runtimeMs        Int?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  attemptsList     TaskAttempt[]
+  artifacts        Artifact[]
+
+  @@index([jobId])
+  @@index([status])
+  @@index([workerId])
+  @@index([leaseExpiresAt])
+}
+
+model TaskAttempt {
+  id            String    @id @default(uuid())
+  taskId        String
+  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  workerId      String
+  worker        Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  attemptNumber Int
+  status        String
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  runtimeMs     Int?
+  errorMessage  String?
+  logs          String?
+
+  @@index([taskId])
+  @@index([workerId])
+}
+
+model Artifact {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId           String?
+  job             Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  taskId          String?
+  task            Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  filename        String
+  mimeType        String   @default("application/octet-stream")
+  sizeBytes       Int      @default(0)
+  checksumSha256  String
+  storageKey      String
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([jobId])
+  @@index([storageKey])
+}
+
+model JobEvent {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  taskId    String?
+  type      String
+  severity  String   @default("INFO")
+  message   String
+  details   String?
+  timestamp DateTime @default(now())
+
+  @@index([jobId])
+  @@index([timestamp])
+}
+
+model WorkerMetrics {
+  id              String   @id @default(uuid())
+  workerId        String
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  cpuUsagePercent Float    @default(0)
+  memoryUsedMb    Float    @default(0)
+  memoryTotalMb   Float    @default(1024)
+  tasksActive     Int      @default(0)
+  tasksCompleted  Int      @default(0)
+  uptimeSeconds   Int      @default(0)
+  timestamp       DateTime @default(now())
+
+  @@index([workerId])
+  @@index([timestamp])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action       String
+  resourceType String
+  resourceId   String?
+  details      String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

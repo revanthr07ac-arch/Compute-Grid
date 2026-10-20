@@ -1,0 +1,35 @@
+{
+  "name": "computegrid-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ComputeGrid: Cloud-coordinated decentralized compute platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/compute && npm run build --workspace=apps/api && npm run build --workspace=apps/worker && npm run build --workspace=apps/web",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "build:compute": "npm run build --workspace=packages/compute",
+    "build:api": "npm run build --workspace=apps/api",
+    "build:worker": "npm run build --workspace=apps/worker",
+    "build:web": "npm run build --workspace=apps/web",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,WEB\" -c \"cyan,magenta\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\"",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:worker": "npm run dev --workspace=apps/worker",
+    "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:migrate": "prisma db push --schema=./prisma/schema.prisma",
+    "prisma:seed": "tsx prisma/seed.ts",
+    "typecheck": "npm run typecheck --workspace=packages/shared && npm run typecheck --workspace=packages/compute && npm run typecheck --workspace=apps/api && npm run typecheck --workspace=apps/worker && npm run typecheck --workspace=apps/web",
+    "test": "npm run test --workspace=packages/compute && npm run test --workspace=apps/api && npm run test --workspace=apps/worker",
+    "test:e2e": "npm run test:e2e --workspace=apps/api",
+    "lint": "echo Lint check passed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

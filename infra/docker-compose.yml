@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: computegrid-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-computegrid}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: computegrid-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: computegrid-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+
+  api:
+    build:
+      context: ..
+      dockerfile: ./apps/api/Dockerfile
+    container_name: computegrid-api
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/computegrid?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-computegrid_prod_jwt_secret_key_super_secure_9921}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_DIR: /app/data/storage
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: computegrid-artifacts
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+    ports:
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - api_storage:/app/data/storage
+
+  web:
+    build:
+      context: ..
+      dockerfile: ./apps/web/Dockerfile
+    container_name: computegrid-web
+    restart: unless-stopped
+    ports:
+      - '5173:80'
+    depends_on:
+      - api
+
+  worker-alpha:
+    build:
+      context: ..
+      dockerfile: ./apps/worker/Dockerfile
+    container_name: computegrid-worker-alpha
+    restart: unless-stopped
+    environment:
+      COMPUTEGRID_SERVER_URL: http://api:4000
+      COMPUTEGRID_ENROLLMENT_TOKEN: ${WORKER_ENROLLMENT_TOKEN:-cg_enroll_demo_initial_token_12345}
+      WORKER_NAME: Container-Worker-Alpha
+      MAX_CONCURRENCY: 2
+    depends_on:
+      - api
+
+  worker-beta:
+    build:
+      context: ..
+      dockerfile: ./apps/worker/Dockerfile
+    container_name: computegrid-worker-beta
+    restart: unless-stopped
+    environment:
+      COMPUTEGRID_SERVER_URL: http://api:4000
+      COMPUTEGRID_ENROLLMENT_TOKEN: ${WORKER_ENROLLMENT_TOKEN:-cg_enroll_demo_initial_token_12345}
+      WORKER_NAME: Container-Worker-Beta
+      MAX_CONCURRENCY: 2
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  api_storage:

@@ -1,0 +1,30 @@
+{
+  "name": "@computegrid/worker",
+  "version": "1.0.0",
+  "description": "ComputeGrid Distributed Worker Agent",
+  "main": "dist/index.js",
+  "bin": {
+    "computegrid-worker": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@computegrid/shared": "*",
+    "commander": "^13.1.0",
+    "dotenv": "^16.4.7",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
